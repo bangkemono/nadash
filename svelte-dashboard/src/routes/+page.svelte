@@ -2,17 +2,14 @@
   import { onMount } from 'svelte';
   import Chart from 'chart.js/auto';
 
-  // --- Configuration ---
   let api_host = '';
   let api_url = '';
 
-  // --- State ---
   let scoreChartCanvas: HTMLCanvasElement;
   let protoChartCanvas: HTMLCanvasElement;
   let scoreChart: Chart;
   let protoChart: Chart;
 
-  // Default state
   let data = {
     status: "CONNECTING...",
     score: 0.0,
@@ -26,9 +23,7 @@
   let isOffline = true;
   let maxFlowBytes = 1; 
 
-  // --- Charts Logic ---
   function initCharts() {
-    // 1. Anomaly Trend (Line Chart)
     scoreChart = new Chart(scoreChartCanvas, {
       type: 'line',
       data: {
@@ -61,7 +56,6 @@
       }
     });
 
-    // 2. Protocol Distribution (Doughnut Chart)
     protoChart = new Chart(protoChartCanvas, {
       type: 'doughnut',
       data: {
@@ -89,15 +83,12 @@
   function updateCharts() {
     if (!scoreChart || !protoChart) return;
 
-    // Safety: Ensure history exists
     const history = data.history || [];
     
-    // 1. Update Line Chart
     if (history.length > 0) {
         scoreChart.data.labels = history.map(d => d.time);
         scoreChart.data.datasets[0].data = history.map(d => d.score);
         
-        // Dynamic Threat Coloring
         const currentScore = data.score || 0;
         const isCritical = currentScore > 0.7;
         
@@ -106,7 +97,6 @@
         scoreChart.update();
     }
 
-    // 2. Update Protocol Chart
     const protocols = data.flow_data?.protocols || [];
     if (protocols.length > 0) {
         const labels = protocols.map(p => p.label);
@@ -119,7 +109,6 @@
         }
     }
 
-    // 3. Update Max Flow Bytes for progress bars
     const topIps = data.flow_data?.top_ips || [];
     if (topIps.length > 0) {
       const maxVal = Math.max(...topIps.map(ip => ip.value));
@@ -127,7 +116,6 @@
     }
   }
 
-  // --- Data Fetching ---
   async function fetchData() {
     if (!api_url) return;
     try {
@@ -135,19 +123,15 @@
       const json = await res.json();
       
       if (json && json.timestamp) {
-        // Preserve old history
         const previousHistory = data.history || [];
 
-        // Update state
         data = json;
         isOffline = false;
 
-        // Manually append new score (Client-side buffer)
         const newPoint = {
             time: new Date().toLocaleTimeString([], { hour12: false }),
             score: data.score
         };
-        // Keep last 20 points
         data.history = [...previousHistory, newPoint].slice(-20);
 
         updateCharts();
@@ -160,9 +144,7 @@
   }
 
   onMount(() => {
-    // Dynamic Host Discovery
     api_host = window.location.hostname;
-    // api_url = `http://${api_host}:8000/dashboard`;
     api_url = `api/dashboard`;
 
     initCharts();

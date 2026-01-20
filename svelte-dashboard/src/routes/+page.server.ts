@@ -1,14 +1,11 @@
 import { env } from '$env/dynamic/private';
 
 export const load = async ({ fetch }) => {
-  // FIX: Use Docker Service Name as default. 
-  // We use "http://" because fetch requires a protocol.
   const backendUrl = env.API_URL || "http://aiops-engine:8000";
 
   console.log(`[SERVER] Connecting to backend at: ${backendUrl}`);
 
   try {
-    // Note: Your python backend uses "/dashboard", not "/status"
     const res = await fetch(`${backendUrl}/dashboard`);
     
     if (!res.ok) {
@@ -22,7 +19,6 @@ export const load = async ({ fetch }) => {
   } catch (error) {
     console.error("[SERVER] Failed to fetch system status:", error);
     
-    // Return safe default so page loads even if backend is down
     return { 
       health: { 
         status: "UNREACHABLE", 
