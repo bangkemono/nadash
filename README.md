@@ -47,13 +47,13 @@ The system is containerized using Docker and consists of these main microservice
 
 ## Project Structure
 
-.
-├── app/                 # Python Backend (FastAPI + PyOD)
-├── svelte-dashboard/    # Frontend (SvelteKit)
-├── nginx/               # Nginx Configuration
-├── softflowd/           # Network Probe Build Context
-├── docker-compose.yml   # Orchestration
-├── prometheus.yml       # Metrics Config
+nadash/<br>
+├── app/                 # Python Backend (FastAPI + PyOD)<br>
+├── svelte-dashboard/    # Frontend (SvelteKit)<br>
+├── nginx/               # Nginx Configuration<br>
+├── softflowd/           # Network Probe Build Context<br>
+├── docker-compose.yml   # Orchestration<br>
+├── prometheus.yml       # Metrics Config<br>
 └── .env                 # Local Secrets (GitIgnored)
 
 ---
