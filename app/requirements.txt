@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+redis
+minio
+prometheus-api-client
+joblib
+pyod
+pandas
+scikit-learn
+apscheduler
+psutil
