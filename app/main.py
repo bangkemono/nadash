@@ -7,10 +7,16 @@ from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 from contextlib import asynccontextmanager
 from pyod.models.copod import COPOD
+from scipy.stats import entropy
 
 # pyod model config
 model = COPOD(contamination=0.1)
-baseline_noise = np.array([[0.0, 0.0, 0.0], [0.5, 0.5, 0.5], [0.1, 0.0, 0.0]])
+baseline_noise = np.array([
+    [0.00, 0.00, 0.00, 0.00, 0.00, 0.00],
+    [0.05, 0.01, 0.02, 0.10, 0.05, 0.50],
+    [0.20, 0.10, 0.05, 0.05, 0.50, 0.20],
+    [0.40, 0.30, 0.20, 0.20, 0.60, 0.80],
+])
 model.fit(baseline_noise)
 
 # net config
@@ -29,6 +35,10 @@ PROTOCOL_MAP = {
 # service connection
 r = redis.Redis(host=REDIS_HOST, port=6379, db=0, decode_responses=True)
 prom = PrometheusConnect(url=PROM_URL, disable_ssl=True)
+
+# sigmoid activation function for COPOD
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
 
 # netflow listener direct via udp
 class NetFlowListener:
@@ -128,28 +138,64 @@ def trigger_analysis():
         raw_protos = r.zrevrange("protocol_usage", 0, -1, withscores=True)
         protocols = [{"label": p, "value": s} for p, s in raw_protos]
 
+
+        top_talker = r.zrange("top_talkers_src", -1, -1, withscores=True)
+        max_flow_score = top_talker[0][1] if top_talker else 0
+        unique_ips = r.zcard("top_talkers_src") or 0
+        proto_data = r.zrange("protocol_usage", 0, -1, withscores=True)
+
+        if proto_data:
+            counts = [score for _, score in proto_data]
+            total = sum(counts)
+            probs = [c / total for c in counts]
+            proto_entropy = entropy(probs)
+        else:
+            proto_entropy = 0.0
+
+        norm_cpu = float(min(cpu_raw, 1.0))
+        norm_mbps = float(min(mbps_raw / 100.0, 1.0))
+        norm_pps = float(min(pps_raw / 10000.0, 1.0))
+        norm_ips = float(min(unique_ips / 1000, 1.0))
+        norm_dom = float(min(max_flow_score / 100000, 1.0))
+        norm_ent = float(min(proto_entropy / 3.0, 1.0))
+
+        current_vector = np.array([[norm_cpu, norm_mbps, norm_pps, norm_ips, norm_dom, norm_ent]])
+        raw_score = model.decision_function(current_vector)[0].item()
+        print(f"[DEBUG] Vector : {current_vector} | Raw : {raw_score}")
+        final_score = sigmoid((raw_score - 5) / 1.11) # tune the values for sensitivity
+
+        if pps_raw < 3: final_score = 0.00
+        if final_score > 0.75:
+            status = "CRITICAL"
+            if top_ips:
+                suspect_ip = top_ips[0]['label']
+                suspect_score = top_ips[0]['value']
+                total_traffic_score = sum(item['value'] for item in top_ips)
+                if (total_traffic_score > 0) and ((suspect_score / total_traffic_score) > 0.5):
+                    primary_attacker = suspect_ip
+                    alert_message = f"Intrusion Detected! Source: {primary_attacker}"
+                    print(f"\n[ALERT] {alert_message} (Confidence: {int(final_score*100)}%)\n")
+                else:
+                    alert_message = "High Anomalous Traffic (Distributed Source)"
+                    print(f"\n[WARNING] {alert_message}\n")
+        elif final_score > 0.50:
+            status = "UNSTABLE"
+        else:
+            status = "HEALTHY"
+        
         raw_top_ips = r.zrevrange("top_talkers_src", 0, 4, withscores=True)
         top_ips = [{"label": ip, "value": score} for ip, score in raw_top_ips]
 
         if r.exists("top_talkers_src"):
             r.zinterstore("top_talkers_src", {"top_talkers_src": 0.5})
+            r.zremrangebyscore("top_talkers_src", "-inf", 1.0)
         if r.exists("protocol_usage"):
             r.zinterstore("protocol_usage", {"protocol_usage": 0.5})
+            r.zremrangebyscore("protocol_usage", "-inf", 1.0)
 
-        norm_cpu = min(cpu_raw, 1.0)
-        norm_mbps = min(mbps_raw / 100.0, 1.0)
-        norm_pps = min(pps_raw / 10000.0, 1.0)
-
-        current_vector = np.array([[norm_cpu, norm_mbps, norm_pps]])
-        anomaly_prob = model.predict_proba(current_vector)[0][1]
-        final_score = round(anomaly_prob, 2)
-
-        if pps_raw < 10: final_score = 0.00
-        status = "CRITICAL" if final_score > 0.70 else "HEALTHY"
-
-        # payload
         timestamp = datetime.now().strftime("%H:%M:%S")
 
+        # payload
         payload = {
             "status": status,
             "score": final_score,
