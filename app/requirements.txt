@@ -1,11 +1,10 @@
 fastapi
 uvicorn
 redis
-minio
+numpy
 prometheus-api-client
-joblib
-pyod
-pandas
-scikit-learn
 apscheduler
-psutil
+pyod
+scikit-learn
+joblib
+

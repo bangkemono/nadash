@@ -4,15 +4,19 @@
 
   let api_host = '';
   let api_url = '';
+  let train_url = '';
 
   let scoreChartCanvas: HTMLCanvasElement;
   let protoChartCanvas: HTMLCanvasElement;
   let scoreChart: Chart;
   let protoChart: Chart;
-
+  
+  // Updated data shape with 'alert'
   let data = {
     status: "CONNECTING...",
     score: 0.0,
+    alert: "System Normal",
+    timestamp: "---",
     interface: "---",
     model: "---",
     metrics: { cpu: 0, mbps: 0, pps: 0 },
@@ -22,6 +26,7 @@
 
   let isOffline = true;
   let maxFlowBytes = 1; 
+  let isTraining = false;
 
   function initCharts() {
     scoreChart = new Chart(scoreChartCanvas, {
@@ -45,7 +50,15 @@
         animation: { duration: 0 },
         plugins: { legend: { display: false } },
         scales: {
-          x: { display: false },
+          x: {
+            display: true,
+            grid: { color: '#374151' },
+            ticks: {
+            color: '#9CA3AF',
+            maxTicksLimit: 6,
+            maxRotation: 0
+            }
+          },
           y: { 
             beginAtZero: true, 
             max: 1.0, 
@@ -84,14 +97,12 @@
     if (!scoreChart || !protoChart) return;
 
     const history = data.history || [];
-    
     if (history.length > 0) {
         scoreChart.data.labels = history.map(d => d.time);
         scoreChart.data.datasets[0].data = history.map(d => d.score);
         
         const currentScore = data.score || 0;
-        const isCritical = currentScore > 0.7;
-        
+        const isCritical = currentScore > 0.75;
         scoreChart.data.datasets[0].borderColor = isCritical ? '#EF4444' : '#60A5FA'; 
         scoreChart.data.datasets[0].backgroundColor = isCritical ? 'rgba(239, 68, 68, 0.2)' : 'rgba(96, 165, 250, 0.1)';
         scoreChart.update();
@@ -101,7 +112,6 @@
     if (protocols.length > 0) {
         const labels = protocols.map(p => p.label);
         const values = protocols.map(p => p.value);
-        
         if (values.some(v => v > 0)) {
             protoChart.data.labels = labels;
             protoChart.data.datasets[0].data = values;
@@ -121,10 +131,8 @@
     try {
       const res = await fetch(api_url);
       const json = await res.json();
-      
       if (json && json.timestamp) {
         const previousHistory = data.history || [];
-
         data = json;
         isOffline = false;
 
@@ -132,7 +140,8 @@
             time: new Date().toLocaleTimeString([], { hour12: false }),
             score: data.score
         };
-        data.history = [...previousHistory, newPoint].slice(-20);
+        // Keep last 60 points for smoother graph
+        data.history = [...previousHistory, newPoint].slice(-60);
 
         updateCharts();
       }
@@ -143,10 +152,27 @@
     }
   }
 
+  // Action: Teach the AI that current traffic is safe
+  async function retrainModel() {
+    if (isTraining) return;
+    isTraining = true;
+    try {
+        // Assuming your vite config proxies /api to backend
+        const res = await fetch('/api/train/retrain-recent', { method: 'POST' });
+        const result = await res.json();
+        alert(`AI Update: ${result.message}`);
+    } catch (e) {
+        alert("Failed to retrain model");
+    } finally {
+        isTraining = false;
+    }
+  }
+
   onMount(() => {
     api_host = window.location.hostname;
+    // Assuming proxy set up in vite.config.ts: /api -> backend:8000
     api_url = `api/dashboard`;
-
+    
     initCharts();
     fetchData();
     const interval = setInterval(fetchData, 1000);
@@ -161,9 +187,9 @@
 
 <div class="min-h-screen bg-gray-900 text-white font-mono p-6 selection:bg-blue-500 selection:text-white">
   
-  <nav class="flex justify-between items-center mb-8 bg-gray-800 p-4 rounded-xl shadow-lg border border-gray-700/50 backdrop-blur-sm">
-    <div class="flex items-center gap-4">
-      <div class="h-10 w-10 bg-blue-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-500/20">
+  <nav class="flex flex-col md:flex-row justify-between items-center mb-8 bg-gray-800 p-4 rounded-xl shadow-lg border border-gray-700/50 backdrop-blur-sm gap-4">
+    <div class="flex items-center gap-4 w-full md:w-auto">
+      <div class="h-10 w-10 bg-blue-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-500/20 shrink-0">
         <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
       </div>
       <div>
@@ -176,7 +202,22 @@
       </div>
     </div>
 
-    <div class="flex items-center gap-4">
+    {#if data.alert && data.alert !== "System Normal"}
+        <div class="flex-grow mx-4 px-4 py-2 bg-red-500/10 border border-red-500/50 rounded text-center animate-pulse">
+            <span class="text-red-400 font-bold text-sm uppercase tracking-wider">⚠️ {data.alert}</span>
+        </div>
+    {/if}
+
+    <div class="flex items-center gap-4 w-full md:w-auto justify-end">
+        <button 
+            on:click={retrainModel}
+            disabled={isTraining}
+            class="px-3 py-1.5 text-xs font-bold border border-gray-600 rounded hover:bg-gray-700 active:scale-95 transition-all text-gray-300 disabled:opacity-50"
+            title="Mark current traffic as safe and retrain"
+        >
+            {isTraining ? 'LEARNING...' : 'FALSE POSITIVE?'}
+        </button>
+
       <div class="text-right hidden sm:block">
         <p class="text-[10px] text-gray-500 font-bold uppercase tracking-wider">System Status</p>
         <p class="font-bold {data.status === 'CRITICAL' ? 'text-red-500' : (isOffline ? 'text-gray-500' : 'text-emerald-400')}">
@@ -197,7 +238,7 @@
     <div class="lg:col-span-1 space-y-6">
       
       <div class="bg-gray-800 p-6 rounded-2xl border border-gray-700 shadow-xl relative overflow-hidden group">
-        <div class="absolute top-0 left-0 w-1 h-full transition-colors duration-300 {data.score > 0.7 ? 'bg-red-500' : 'bg-blue-500'}"></div>
+        <div class="absolute top-0 left-0 w-1 h-full transition-colors duration-300 {data.score > 0.75 ? 'bg-red-500' : 'bg-blue-500'}"></div>
         
         <div class="flex justify-between items-start mb-2">
             <h3 class="text-gray-400 text-[10px] font-bold uppercase tracking-wider">Anomaly Probability</h3>
@@ -210,7 +251,7 @@
         </div>
         
         <div class="mt-4 h-1.5 w-full bg-gray-700 rounded-full overflow-hidden">
-             <div class="h-full transition-all duration-500 {data.score > 0.7 ? 'bg-red-500' : 'bg-blue-500'}" style="width: {data.score * 100}%"></div>
+             <div class="h-full transition-all duration-500 {data.score > 0.75 ? 'bg-red-500' : 'bg-blue-500'}" style="width: {data.score * 100}%"></div>
         </div>
       </div>
 
@@ -238,7 +279,7 @@
         <div class="bg-gray-800 p-4 rounded-xl border border-gray-700 col-span-2 hover:border-gray-600 transition-colors">
           <div class="flex justify-between items-center mb-1">
              <p class="text-gray-500 text-[10px] font-bold uppercase">Network Traffic</p>
-             <span class="text-[10px] text-blue-400 bg-blue-400/10 px-2 py-0.5 rounded">Rx Only</span>
+             <span class="text-[10px] text-blue-400 bg-blue-400/10 px-2 py-0.5 rounded">Rx / Tx</span>
           </div>
           <p class="text-3xl font-bold text-white tracking-tight">{data.metrics.mbps} <span class="text-sm text-gray-500 font-normal">Mbps</span></p>
         </div>
@@ -252,7 +293,7 @@
            <p class="text-xs text-gray-500">Live inference stream from the {data.model} model</p>
         </div>
         <div class="flex items-center gap-2">
-           <span class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+           <span class="w-2 h-2 rounded-full {data.status === 'CRITICAL' ? 'bg-red-500' : 'bg-emerald-500'} animate-pulse"></span>
            <span class="text-xs text-gray-400 font-mono">LIVE</span>
         </div>
       </div>
@@ -309,7 +350,6 @@
             {/if}
         </div>
       </div>
-
     </div>
   </div>
 </div>

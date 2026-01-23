@@ -27,6 +27,9 @@ services:
     depends_on:
       - redis
       - prometheus
+    volumes:
+      - ./app:/app
+      - ./data:/app/data
 
   frontend:
     build: ./svelte-dashboard
