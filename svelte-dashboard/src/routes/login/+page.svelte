@@ -1,5 +1,20 @@
 <script lang="ts">
-    export let form;
+    import { enhance, applyAction } from '$app/forms';
+    import { goto } from '$app/navigation';
+    
+    export let form; 
+
+    const handleLogin = () => {
+        return async ({ result }) => {
+            if (result.type === 'success' && result.data?.token) {
+                localStorage.setItem('auth_token', result.data.token);
+                await goto('/');
+            } else if (result.type === 'failure') {
+                // turns out you need this line to update the form prop
+                await applyAction(result); 
+            }
+        };
+    };
 </script>
 
 <div class="flex min-h-screen justify-center items-center bg-gray-900">
@@ -21,7 +36,7 @@
             <p class="text-gray-400 text-sm">please sign in beforehand</p>
         </div>
 
-        <form method="POST" class="w-full space-y-4">
+        <form method="POST" use:enhance={handleLogin} class="w-full space-y-4">
             {#if form?.error}
                 <div class="p-3 bg-red-500/20 border border-red-500/50 rounded-lg text-red-200 text-xs text-center">
                     {form.error}

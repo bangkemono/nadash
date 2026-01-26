@@ -1,19 +1,9 @@
 <script lang="ts">
-  export let data;
-  
   import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
   import Chart from 'chart.js/auto';
 
-  let api_host = '';
-  let api_url = 'api/dashboard'; 
-  let train_url = '';
-
-  let scoreChartCanvas: HTMLCanvasElement;
-  let protoChartCanvas: HTMLCanvasElement;
-  let scoreChart: Chart;
-  let protoChart: Chart;
-
-  let dashboard = data.health || {
+  let dashboard = {
     status: "CONNECTING...",
     score: 0.0,
     alert: "System Normal",
@@ -25,11 +15,66 @@
     history: []
   };
 
-  $: user = data.user;
-
-  let isOffline = true;
+  let user = { name: "Admin" }; 
+  
+  let api_host = '';
+  let api_url = 'api/dashboard'; 
+  
+  let scoreChartCanvas: HTMLCanvasElement;
+  let protoChartCanvas: HTMLCanvasElement;
+  let scoreChart: Chart;
+  let protoChart: Chart;
   let maxFlowBytes = 1; 
   let isTraining = false;
+  let isOffline = true;
+
+  async function handleLogout() {
+      localStorage.removeItem('auth_token');
+      await goto('/login');
+  }
+
+  async function fetchData() {
+    const token = localStorage.getItem('auth_token');
+
+    if (!token) {
+        goto('/login');
+        return;
+    }
+
+    try {
+      const res = await fetch(api_url, {
+          headers: {
+              'Authorization': `Bearer ${token}`
+          }
+      });
+
+      if (res.status === 401) {
+          localStorage.removeItem('auth_token');
+          goto('/login');
+          return;
+      }
+
+      const json = await res.json();
+      
+      if (json && json.timestamp) {
+        const previousHistory = dashboard.history || [];
+        dashboard = json;
+        isOffline = false;
+
+        const newPoint = {
+            time: new Date().toLocaleTimeString([], { hour12: false }),
+            score: dashboard.score
+        };
+        dashboard.history = [...previousHistory, newPoint].slice(-60);
+
+        updateCharts();
+      }
+    } catch (e) {
+      console.error("Fetch error:", e);
+      isOffline = true;
+      dashboard.status = "OFFLINE";
+    }
+  }
 
   function initCharts() {
     if (!scoreChartCanvas || !protoChartCanvas) return;
@@ -38,7 +83,7 @@
     const gradient = ctx.createLinearGradient(0, 0, 0, 400);
     gradient.addColorStop(0, 'rgba(96, 165, 250, 0.6)'); 
     gradient.addColorStop(1, 'rgba(96, 165, 250, 0.0)');
-
+    
     scoreChart = new Chart(scoreChartCanvas, {
       type: 'line',
       data: {
@@ -117,7 +162,7 @@
 
   function updateCharts() {
     if (!scoreChart || !protoChart) return;
-
+    
     const history = dashboard.history || [];
     if (history.length > 0) {
         scoreChart.data.labels = history.map(d => d.time);
@@ -137,7 +182,6 @@
             newGradient.addColorStop(1, 'rgba(96, 165, 250, 0.0)');
         }
         scoreChart.data.datasets[0].backgroundColor = newGradient;
-        
         scoreChart.update();
     }
 
@@ -159,39 +203,17 @@
     }
   }
 
-  async function fetchData() {
-    if (!api_url) return;
-    try {
-      const res = await fetch(api_url);
-      const json = await res.json();
-      
-      if (json && json.timestamp) {
-        const previousHistory = dashboard.history || [];
-        
-        dashboard = json;
-        isOffline = false;
-
-        const newPoint = {
-            time: new Date().toLocaleTimeString([], { hour12: false }),
-            score: dashboard.score
-        };
-        
-        dashboard.history = [...previousHistory, newPoint].slice(-60);
-
-        updateCharts();
-      }
-    } catch (e) {
-      console.error("Fetch error:", e);
-      isOffline = true;
-      dashboard.status = "OFFLINE";
-    }
-  }
-
   async function retrainModel() {
+    const token = localStorage.getItem('auth_token');
     if (isTraining) return;
     isTraining = true;
     try {
-        const res = await fetch('/api/train/retrain-recent', { method: 'POST' });
+        const res = await fetch('/api/train/retrain-recent', { 
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
         const result = await res.json();
         alert(`AI Update: ${result.message}`);
     } catch (e) {
@@ -203,15 +225,8 @@
 
   onMount(() => {
     api_host = window.location.hostname;
-    api_url = `api/dashboard`; 
     
     initCharts();
-    
-    if (dashboard.history && dashboard.history.length > 0) {
-        updateCharts();
-    }
-    
-    // poll data
     fetchData();
     const interval = setInterval(fetchData, 1000);
 
@@ -227,15 +242,12 @@
   <nav class="relative flex flex-col md:flex-row justify-between items-center mb-8 bg-gray-800/80 p-4 rounded-xl shadow-2xl border border-gray-700 backdrop-blur-md gap-4 overflow-hidden">
     
     <div class="flex items-center gap-4">
-        <form action="/logout" method="POST">
-            <button class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 px-4 py-2 rounded-lg text-sm font-bold transition-all">
-                LOGOUT
-            </button>
-        </form>
+        <button on:click={handleLogout} class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 px-4 py-2 rounded-lg text-sm font-bold transition-all">LOGOUT</button>
+        
         <div class="hidden sm:block border-l border-gray-700 pl-4">
             <p class="text-[10px] text-gray-500 font-bold">Signed in as :</p>
             <p class="text-sm font-bold text-blue-400">
-                {user?.name || user?.user || 'Unknown'}
+                {user?.name || 'Admin'}
             </p>
         </div>
     </div>
@@ -262,7 +274,7 @@
     </div>
 
     {#if dashboard.alert && dashboard.alert !== "System Normal"}
-        <div class="flex-grow mx-4 px-4 py-2 bg-red-500/10 border border-red-500/50 rounded text-center animate-pulse shadow-[0_0_20px_rgba(239,68,68,0.2)]">
+      <div class="flex-grow mx-4 px-4 py-2 bg-red-500/10 border border-red-500/50 rounded text-center animate-pulse shadow-[0_0_20px_rgba(239,68,68,0.2)]">
             <span class="text-red-400 font-bold text-sm uppercase tracking-wider">⚠️ {dashboard.alert}</span>
         </div>
     {/if}
@@ -332,7 +344,7 @@
           <div class="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-blue-500 to-transparent opacity-30"></div>
           <div class="flex justify-between items-center mb-1">
              <p class="text-gray-500 text-[10px] font-bold uppercase">Network Traffic</p>
-             <span class="text-[10px] text-blue-400 bg-blue-400/10 px-2 py-0.5 rounded font-mono border border-blue-400/20">Rx / Tx</span>
+              <span class="text-[10px] text-blue-400 bg-blue-400/10 px-2 py-0.5 rounded font-mono border border-blue-400/20">Rx / Tx</span>
           </div>
           <p class="text-3xl font-bold text-white tracking-tight font-mono">{dashboard.metrics.mbps} <span class="text-sm text-gray-500 font-sans font-normal">Mbps</span></p>
         </div>
@@ -398,7 +410,7 @@
                         </div>
                         <div class="w-full h-1.5 bg-gray-700/50 rounded-full overflow-hidden">
                             <div class="h-full bg-gradient-to-r from-blue-600 to-blue-400 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.5)]" 
-                            style="width: {(ip.value / maxFlowBytes) * 100}%"></div>
+                               style="width: {(ip.value / maxFlowBytes) * 100}%"></div>
                         </div>
                     </div>
                 {/each}

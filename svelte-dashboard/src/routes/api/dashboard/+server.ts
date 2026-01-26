@@ -3,31 +3,31 @@ import { json } from '@sveltejs/kit';
 
 const API_URL = env.API_URL || "http://nadash-backend:8000";
 
-export async function GET({ cookies, fetch }) {
-    // fetch auth_token for json data authorization
-    const token = cookies.get('auth_token');
+export async function GET({ request, fetch }) {
+    // fetch Authorization header
+    const authHeader = request.headers.get('Authorization');
 
-    if (!token) {
+    if (!authHeader) {
         return json({ status: "UNAUTHORIZED" }, { status: 401 });
     }
 
     try {
+        // pass to python
         const res = await fetch(`${API_URL}/dashboard`, {
             headers: {
-                'Authorization': `Bearer ${token}`
+                'Authorization': authHeader
             }
         });
 
         if (res.status === 401) {
-            cookies.delete('auth_token', { path: '/' });
             return json({ status: "EXPIRED" }, { status: 401 });
         }
 
         const data = await res.json();
         return json(data);
 
-    } catch (error) {
-        console.error("[API Proxy] Connection failed:", error);
+    } catch (e) {
         return json({ status: "OFFLINE" }, { status: 500 });
     }
 }
+
