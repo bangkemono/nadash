@@ -12,12 +12,10 @@ This project implements an **AIOps (Artificial Intelligence for IT Operations)**
 Unlike traditional rule-based firewalls, this system is **unsupervised**. It learns the "baseline" of your network traffic in real-time and flags any deviations (like a SYN Flood) as anomalies.
 
 ### Key Features
-* **Secure Architecture:** Uses Nginx to expose only Port 80, keeping backend services (API, DB, Metrics) isolated from the public network.
+* **Secure BFF Architecture:** The SvelteKit frontend acts as an authentication proxy. Browsers use HttpOnly Cookies, while the proxy communicates with the backend via Bearer Tokens.
 * **Real-Time Monitoring:** Scrapes metrics every second via Prometheus & Node Exporter.
 * **Direct NetFlow Ingestion:** High-speed, custom UDP listener (Port 2055) to track Top IPs and Protocols in real-time without external collectors.
 * **Unsupervised Learning:** Uses [PyOD](https://github.com/yzhao062/pyod) to detect unknown attack patterns.
-* **Traffic Gate:** Automatically ignores statistical noise during idle periods to prevent false positives.
-* **Modern Tech Stack:** Fully containerized with **Docker** for effortless deployment and features a reactive **Svelte** frontend for high-performance visualization.
 
 ---
 
@@ -40,7 +38,6 @@ The system is containerized using Docker and consists of these main microservice
 
 * **Docker** & **Docker Compose** installed.
 * **Linux Environment** (Required for `node-exporter` to access host network interfaces).
-* **Python 3.10+** (Only if running the attack scripts manually).
 * **Root Privileges** (Required to put the network card into promiscuous mode).
 
 ---
@@ -73,6 +70,12 @@ Open .env and set your Target Interface (run ip a to find yours, e.g., eth0, enp
 # .env
 TARGET_INTERFACE=enp1s0
 NETFLOW_PORT=2055
+JWT_SECRET="a-string-secret-at-least-256-bits-long"
+```
+
+For JWT_SECRET you can use the following command to generate it.
+```bash
+openssl rand -hex 32
 ```
 
 ### 2. Configure the Firewall
@@ -82,14 +85,27 @@ sudo ufw allow in on docker0
 sudo ufw reload
 ```
 
-### 3. Start the System
+### 3. Create an Admin User
+By default users.json is not yet created, therefore you must create an admin user first
+#### 1. Build the backend
+```bash
+docker compose build backend
+```
+
+#### 2. Run add-user.py
+```bash
+cd app/
+docker exec -it nadash-backend python3 add-user.py <username> <password> "<Title>"
+```
+
+### 4. Start the System
 
 Run the entire stack in detached mode:
 ```bash
 docker compose up -d --build
 ```
 
-### 4. Verify Health
+### 5. Verify Health
 
 Check if the containers are running:
 
@@ -106,7 +122,6 @@ If you had another instance of the given service then you must kill the service 
 
 The AIOps Engine exposes a JSON endpoint for the dashboard:
 - URL: http://localhost (or http://<TARGET_SERVER_IP>)
-  - Note: You do not need to specify port 3000. Nginx handles the routing.
 
 ### 2. Simulate an Attack (DDoS)
 
@@ -153,7 +168,8 @@ The logic inside main.py is designed to filter noise and detect true threats.
 - .env (Environment Variables)
     - TARGET_INTERFACE: (Crucial) The network interface controller (NIC) to monitor (e.g., enp1s0, eth0).
     - NETFLOW_PORT: The UDP port for flow ingestion (Default: 2055).
-    - ALLOWED_ORIGINS: Restrict which IPs can access the backend API (Default: *).
+    - JWT_SECRET: The Secret JWT uses to generate its tokens
+
 - docker-compose.yml
     - TZ: Set your timezone (e.g., Asia/Jakarta) to ensure logs and graphs match your wall clock.
 
@@ -165,10 +181,9 @@ The logic inside main.py is designed to filter noise and detect true threats.
 
 ## Troubleshooting
 
-- Prometheus Target is DOWN?
-    - Check http://localhost:9090/targets.
-    - If error is "No route to host," check the Firewall step above.
-    - Ensure node-exporter is running in network_mode: host in the compose file.
+- Server error after login?
+    - That's probably because of the server unable to reach cpu metrics via node_exporter
+    - Run `sudo ufw reload` to make sure docker's network is accessible by the firewall
 
 - Top Source IPs are empty / "Waiting for flows..."
     - Ensure softflowd is running: docker logs softflowd.

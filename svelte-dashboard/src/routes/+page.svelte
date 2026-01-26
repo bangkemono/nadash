@@ -1,9 +1,11 @@
 <script lang="ts">
+  export let data;
+  
   import { onMount } from 'svelte';
   import Chart from 'chart.js/auto';
 
   let api_host = '';
-  let api_url = '';
+  let api_url = 'api/dashboard'; 
   let train_url = '';
 
   let scoreChartCanvas: HTMLCanvasElement;
@@ -11,7 +13,7 @@
   let scoreChart: Chart;
   let protoChart: Chart;
 
-  let data = {
+  let dashboard = data.health || {
     status: "CONNECTING...",
     score: 0.0,
     alert: "System Normal",
@@ -23,11 +25,15 @@
     history: []
   };
 
+  $: user = data.user;
+
   let isOffline = true;
   let maxFlowBytes = 1; 
   let isTraining = false;
 
   function initCharts() {
+    if (!scoreChartCanvas || !protoChartCanvas) return;
+
     const ctx = scoreChartCanvas.getContext('2d');
     const gradient = ctx.createLinearGradient(0, 0, 0, 400);
     gradient.addColorStop(0, 'rgba(96, 165, 250, 0.6)'); 
@@ -40,7 +46,7 @@
         datasets: [{
           label: 'Anomaly Score',
           data: [],
-          backgroundColor: gradient, // clean gradient reference
+          backgroundColor: gradient,
           borderColor: '#60A5FA', 
           borderWidth: 2,
           fill: true,
@@ -112,12 +118,12 @@
   function updateCharts() {
     if (!scoreChart || !protoChart) return;
 
-    const history = data.history || [];
+    const history = dashboard.history || [];
     if (history.length > 0) {
         scoreChart.data.labels = history.map(d => d.time);
         scoreChart.data.datasets[0].data = history.map(d => d.score);
         
-        const currentScore = data.score || 0;
+        const currentScore = dashboard.score || 0;
         const isCritical = currentScore > 0.75;
         scoreChart.data.datasets[0].borderColor = isCritical ? '#EF4444' : '#60A5FA'; 
         
@@ -135,7 +141,7 @@
         scoreChart.update();
     }
 
-    const protocols = data.flow_data?.protocols || [];
+    const protocols = dashboard.flow_data?.protocols || [];
     if (protocols.length > 0) {
         const labels = protocols.map(p => p.label);
         const values = protocols.map(p => p.value);
@@ -146,7 +152,7 @@
         }
     }
 
-    const topIps = data.flow_data?.top_ips || [];
+    const topIps = dashboard.flow_data?.top_ips || [];
     if (topIps.length > 0) {
       const maxVal = Math.max(...topIps.map(ip => ip.value));
       maxFlowBytes = maxVal > 0 ? maxVal : 1; 
@@ -158,23 +164,26 @@
     try {
       const res = await fetch(api_url);
       const json = await res.json();
+      
       if (json && json.timestamp) {
-        const previousHistory = data.history || [];
-        data = json;
+        const previousHistory = dashboard.history || [];
+        
+        dashboard = json;
         isOffline = false;
 
         const newPoint = {
             time: new Date().toLocaleTimeString([], { hour12: false }),
-            score: data.score
+            score: dashboard.score
         };
-        data.history = [...previousHistory, newPoint].slice(-60);
+        
+        dashboard.history = [...previousHistory, newPoint].slice(-60);
 
         updateCharts();
       }
     } catch (e) {
       console.error("Fetch error:", e);
       isOffline = true;
-      data.status = "OFFLINE";
+      dashboard.status = "OFFLINE";
     }
   }
 
@@ -194,9 +203,15 @@
 
   onMount(() => {
     api_host = window.location.hostname;
-    api_url = `api/dashboard`;
+    api_url = `api/dashboard`; 
     
     initCharts();
+    
+    if (dashboard.history && dashboard.history.length > 0) {
+        updateCharts();
+    }
+    
+    // poll data
     fetchData();
     const interval = setInterval(fetchData, 1000);
 
@@ -208,32 +223,47 @@
   });
 </script>
 
-  <div class="min-h-screen text-white font-sans tracking-tight p-6 selection:bg-blue-500 selection:text-white" style="background-color: #030712; /* gray-950 */ background-image: linear-gradient(rgba(59, 130, 246, 0.15) 1px, transparent 1px), linear-gradient(90deg, rgba(59, 130, 246, 0.15) 1px, transparent 1px); background-size: 40px 40px;">
+<div class="min-h-screen text-white font-sans tracking-tight p-6 selection:bg-blue-500 selection:text-white" style="background-color: #030712; background-image: linear-gradient(rgba(59, 130, 246, 0.15) 1px, transparent 1px), linear-gradient(90deg, rgba(59, 130, 246, 0.15) 1px, transparent 1px); background-size: 40px 40px;">
   <nav class="relative flex flex-col md:flex-row justify-between items-center mb-8 bg-gray-800/80 p-4 rounded-xl shadow-2xl border border-gray-700 backdrop-blur-md gap-4 overflow-hidden">
+    
+    <div class="flex items-center gap-4">
+        <form action="/logout" method="POST">
+            <button class="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 px-4 py-2 rounded-lg text-sm font-bold transition-all">
+                LOGOUT
+            </button>
+        </form>
+        <div class="hidden sm:block border-l border-gray-700 pl-4">
+            <p class="text-[10px] text-gray-500 font-bold">Signed in as :</p>
+            <p class="text-sm font-bold text-blue-400">
+                {user?.name || user?.user || 'Unknown'}
+            </p>
+        </div>
+    </div>
+    
     <div class="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-blue-500 to-transparent opacity-50"></div>
 
     <div class="flex items-center gap-4 w-full md:w-auto">
       <div class="group relative flex h-10 w-10 items-center justify-center overflow-hidden rounded-lg bg-gray-800 border border-blue-500/30 shadow-[0_0_10px_rgba(59,130,246,0.3)]">
            <div class="absolute inset-0 bg-blue-500/10 group-hover:bg-blue-500/20 transition-colors"></div>
-                <svg class="relative h-8 w-8 text-blue-500 drop-shadow-[0_0_5px_rgba(59,130,246,0.8)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 2l9 4.9V17.1L12 22 3 17.1V6.9L12 2z" />
-                  <circle cx="12" cy="12" r="3" class="fill-blue-400/20 stroke-blue-400" />
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 2v4 M12 22v-4" class="opacity-50" />
-                </svg>
+           <svg class="relative h-8 w-8 text-blue-500 drop-shadow-[0_0_5px_rgba(59,130,246,0.8)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 2l9 4.9V17.1L12 22 3 17.1V6.9L12 2z" />
+              <circle cx="12" cy="12" r="3" class="fill-blue-400/20 stroke-blue-400" />
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 2v4 M12 22v-4" class="opacity-50" />
+           </svg>
       </div>
       <div>
         <h1 class="text-lg font-bold tracking-tighter text-white">NADash</h1>
         <div class="flex items-center gap-2 text-xs text-gray-400">
-          <span class="bg-gray-700/50 px-2 py-0.5 rounded text-gray-300 font-medium font-mono border border-gray-600">{data.interface}</span>
+          <span class="bg-gray-700/50 px-2 py-0.5 rounded text-gray-300 font-medium font-mono border border-gray-600">{dashboard.interface}</span>
           <span>•</span>
-          <span class="text-blue-400 font-medium tracking-normal">{data.model}</span>
+          <span class="text-blue-400 font-medium tracking-normal">{dashboard.model}</span>
         </div>
       </div>
     </div>
 
-    {#if data.alert && data.alert !== "System Normal"}
+    {#if dashboard.alert && dashboard.alert !== "System Normal"}
         <div class="flex-grow mx-4 px-4 py-2 bg-red-500/10 border border-red-500/50 rounded text-center animate-pulse shadow-[0_0_20px_rgba(239,68,68,0.2)]">
-            <span class="text-red-400 font-bold text-sm uppercase tracking-wider">⚠️ {data.alert}</span>
+            <span class="text-red-400 font-bold text-sm uppercase tracking-wider">⚠️ {dashboard.alert}</span>
         </div>
     {/if}
 
@@ -248,13 +278,13 @@
 
       <div class="text-right hidden sm:block">
         <p class="text-[10px] text-gray-500 font-bold uppercase tracking-wider">System Status</p>
-        <p class="font-bold font-mono tracking-normal {data.status === 'CRITICAL' ? 'text-red-500 drop-shadow-[0_0_5px_rgba(239,68,68,0.8)]' : (isOffline ? 'text-gray-500' : 'text-emerald-400 drop-shadow-[0_0_5px_rgba(52,211,153,0.5)]')}">
-          {data.status}
+        <p class="font-bold font-mono tracking-normal {dashboard.status === 'CRITICAL' ? 'text-red-500 drop-shadow-[0_0_5px_rgba(239,68,68,0.8)]' : (isOffline ? 'text-gray-500' : 'text-emerald-400 drop-shadow-[0_0_5px_rgba(52,211,153,0.5)]')}">
+          {dashboard.status}
         </p>
       </div>
       <div class="relative">
-        <div class="h-3 w-3 rounded-full {data.status === 'CRITICAL' ? 'bg-red-500' : 'bg-emerald-500'} animate-pulse"></div>
-        {#if data.status === 'CRITICAL'}
+        <div class="h-3 w-3 rounded-full {dashboard.status === 'CRITICAL' ? 'bg-red-500' : 'bg-emerald-500'} animate-pulse"></div>
+        {#if dashboard.status === 'CRITICAL'}
           <div class="absolute -inset-1 rounded-full bg-red-500 opacity-20 animate-ping"></div>
         {/if}
       </div>
@@ -267,7 +297,7 @@
       <div class="bg-gray-800/80 p-6 rounded-2xl border border-gray-700 shadow-xl relative overflow-hidden group backdrop-blur-sm">
         <div class="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-blue-500 to-transparent opacity-50"></div>
         
-        <div class="absolute top-0 left-0 w-1 h-full transition-colors duration-300 {data.score > 0.75 ? 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 'bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]'}"></div>
+        <div class="absolute top-0 left-0 w-1 h-full transition-colors duration-300 {dashboard.score > 0.75 ? 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]' : 'bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]'}"></div>
         
         <div class="flex justify-between items-start mb-2">
             <h3 class="text-gray-400 text-[10px] font-bold uppercase tracking-wider">Anomaly Probability</h3>
@@ -275,19 +305,19 @@
         </div>
         
         <div class="flex items-baseline gap-2">
-          <span class="text-5xl font-bold text-white tracking-tighter font-mono">{(data.score * 100).toFixed(0)}</span>
+          <span class="text-5xl font-bold text-white tracking-tighter font-mono">{(dashboard.score * 100).toFixed(0)}</span>
           <span class="text-xl text-gray-500 font-sans">%</span>
         </div>
         
         <div class="mt-4 h-1.5 w-full bg-gray-700 rounded-full overflow-hidden">
-             <div class="h-full transition-all duration-500 {data.score > 0.75 ? 'bg-red-500' : 'bg-blue-500'}" style="width: {data.score * 100}%"></div>
+             <div class="h-full transition-all duration-500 {dashboard.score > 0.75 ? 'bg-red-500' : 'bg-blue-500'}" style="width: {dashboard.score * 100}%"></div>
         </div>
       </div>
 
       <div class="grid grid-cols-2 gap-4">
         {#each [
-            { label: 'CPU LOAD', val: data.metrics.cpu + '%', icon: 'M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z' },
-            { label: 'PKTS/SEC', val: data.metrics.pps, icon: 'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4' }
+            { label: 'CPU LOAD', val: dashboard.metrics.cpu + '%', icon: 'M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z' },
+            { label: 'PKTS/SEC', val: dashboard.metrics.pps, icon: 'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4' }
         ] as metric}
         <div class="bg-gray-800/80 p-4 rounded-xl border border-gray-700 hover:border-gray-600 transition-colors relative overflow-hidden">
           <div class="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-gray-400 to-transparent opacity-20"></div>
@@ -304,7 +334,7 @@
              <p class="text-gray-500 text-[10px] font-bold uppercase">Network Traffic</p>
              <span class="text-[10px] text-blue-400 bg-blue-400/10 px-2 py-0.5 rounded font-mono border border-blue-400/20">Rx / Tx</span>
           </div>
-          <p class="text-3xl font-bold text-white tracking-tight font-mono">{data.metrics.mbps} <span class="text-sm text-gray-500 font-sans font-normal">Mbps</span></p>
+          <p class="text-3xl font-bold text-white tracking-tight font-mono">{dashboard.metrics.mbps} <span class="text-sm text-gray-500 font-sans font-normal">Mbps</span></p>
         </div>
       </div>
     </div>
@@ -318,7 +348,7 @@
            <p class="text-xs text-gray-500">Live inference stream</p>
         </div>
         <div class="flex items-center gap-2">
-           <span class="w-2 h-2 rounded-full {data.status === 'CRITICAL' ? 'bg-red-500' : 'bg-emerald-500'} animate-pulse"></span>
+           <span class="w-2 h-2 rounded-full {dashboard.status === 'CRITICAL' ? 'bg-red-500' : 'bg-emerald-500'} animate-pulse"></span>
            <span class="text-xs text-gray-400 font-mono font-bold tracking-wider">LIVE</span>
         </div>
       </div>
@@ -334,13 +364,13 @@
         <h3 class="text-gray-400 text-[10px] font-bold uppercase tracking-wider mb-4 border-b border-gray-700 pb-2">Protocol Mix</h3>
         <div class="h-32 relative">
             <canvas bind:this={protoChartCanvas}></canvas>
-            {#if (!data.flow_data?.protocols || data.flow_data.protocols.length === 0)}
+            {#if (!dashboard.flow_data?.protocols || dashboard.flow_data.protocols.length === 0)}
               <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <span class="text-xs text-gray-600 italic">No Data</span>
               </div>
             {:else}
               <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                  <span class="text-2xl font-bold text-white font-mono">{data.flow_data.protocols.length}</span>
+                  <span class="text-2xl font-bold text-white font-mono">{dashboard.flow_data.protocols.length}</span>
                   <span class="text-[10px] text-gray-500 uppercase">Types</span>
               </div>
             {/if}
@@ -355,12 +385,12 @@
         </div>
         
         <div class="space-y-4">
-            {#if (!data.flow_data?.top_ips || data.flow_data.top_ips.length === 0)}
+            {#if (!dashboard.flow_data?.top_ips || dashboard.flow_data.top_ips.length === 0)}
                 <div class="flex flex-col items-center justify-center h-32 text-gray-600">
                     <p class="text-xs italic">Waiting for flows...</p>
                 </div>
             {:else}
-                {#each data.flow_data.top_ips as ip}
+                {#each dashboard.flow_data.top_ips as ip}
                     <div>
                         <div class="flex justify-between items-center text-xs mb-1">
                             <span class="text-gray-300 font-mono tracking-wide">{ip.label}</span>
@@ -368,7 +398,7 @@
                         </div>
                         <div class="w-full h-1.5 bg-gray-700/50 rounded-full overflow-hidden">
                             <div class="h-full bg-gradient-to-r from-blue-600 to-blue-400 rounded-full shadow-[0_0_8px_rgba(59,130,246,0.5)]" 
-                                 style="width: {(ip.value / maxFlowBytes) * 100}%"></div>
+                            style="width: {(ip.value / maxFlowBytes) * 100}%"></div>
                         </div>
                     </div>
                 {/each}

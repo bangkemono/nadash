@@ -11,7 +11,7 @@ export default defineConfig({
     strictPort:true,
         proxy: {
             '/api': {
-                target: 'http://aiops-engine:8000',
+                target: 'http://nadash-backend:8000',
                 changeOrigin: true,
                 secure: false,
                 // Add this line to strip '/api' from the URL
