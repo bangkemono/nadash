@@ -3,11 +3,20 @@ import { env } from '$env/dynamic/private';
 
 const API_URL = env.API_URL || "http://nadash-backend:8000";
 
+// check if jwt is loaded or not
+export const load = async ({ cookies }) => {
+    const token = cookies.get('auth_token');
+    if (token) {
+        throw redirect(303, '/');
+    }
+};
+
 export const actions = {
     default: async ({ cookies, request, fetch }) => {
         const data = await request.formData();
         const username = data.get('username') as string;
         const password = data.get('password') as string;
+        let success = false;
 
         console.log(`[LOGIN] Proxying auth request for user: '${username}' to Python...`);
 
@@ -44,7 +53,7 @@ export const actions = {
                 maxAge: 3600 
             });
 
-            throw redirect(302, '/');
+            return {success : true}
 
         } catch (error) {
             if (error.status === 302) throw error;
